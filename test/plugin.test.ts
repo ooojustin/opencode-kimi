@@ -5,7 +5,7 @@ import { test, expect, afterEach } from "bun:test"
 import pluginModule from "../src/index.ts"
 
 const plugin = pluginModule.server
-import { MODEL_ID, PROVIDER_ID, REFRESH_SAFETY_WINDOW_MS } from "../src/constants.ts"
+import { MODEL_ID, PROVIDER_ID, REFRESH_SAFETY_WINDOW_MS, WIRE_MODEL_ID } from "../src/constants.ts"
 import { installFetchMock } from "./_util/fetchMock.ts"
 
 // kimiHeaders() → getDeviceId() reads/writes ~/.kimi/device_id; that file is
@@ -165,7 +165,7 @@ test("chat.params: no-op for other models under our provider (rule 5 gating)", a
   expect(output.options.thinking).toBeUndefined()
 })
 
-test("chat.params: attaches prompt_cache_key = sessionID for kimi-for-coding only", async () => {
+test("chat.params: attaches prompt_cache_key = sessionID for kimi only", async () => {
   const { hooks } = await getHooks()
   const hook = hooks["chat.params"]!
   const { output } = await callParams(hook, { sessionID: "sess-42" })
@@ -174,7 +174,7 @@ test("chat.params: attaches prompt_cache_key = sessionID for kimi-for-coding onl
 
 // The effort matrix is the most load-bearing contract in AGENTS.md → rule 4.
 // Off  → thinking disabled, reasoning_effort stripped.
-// low/medium/high → reasoning_effort kept, thinking enabled.
+// high → reasoning_effort kept, thinking enabled.
 // unset → thinking enabled, no reasoning_effort (server-picks default).
 const EFFORT_MATRIX: Array<{
   in: Record<string, unknown>
@@ -182,8 +182,6 @@ const EFFORT_MATRIX: Array<{
   thinkingType: "enabled" | "disabled"
 }> = [
   { in: { reasoning_effort: "off" }, effort: undefined, thinkingType: "disabled" },
-  { in: { reasoning_effort: "low" }, effort: "low", thinkingType: "enabled" },
-  { in: { reasoning_effort: "medium" }, effort: "medium", thinkingType: "enabled" },
   { in: { reasoning_effort: "high" }, effort: "high", thinkingType: "enabled" },
   { in: {}, effort: undefined, thinkingType: "enabled" },
 ]
@@ -236,7 +234,6 @@ test("chat.headers: selected variant overrides model options for the wire effort
     variants: {
       auto: { reasoning_effort: "auto" },
       off: { reasoning_effort: "off" },
-      low: { reasoning_effort: "low" },
     },
     variant: "off",
   })
@@ -287,7 +284,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-function makeProviderState(context = 0) {
+function makeProviderState(context = 0, name: string | null = "Kimi") {
   return {
     id: PROVIDER_ID,
     models: {
@@ -301,7 +298,7 @@ function makeProviderState(context = 0) {
         },
         status: "active",
         headers: {},
-        name: "Kimi For Coding",
+        ...(name === null ? {} : { name }),
         options: {},
         cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
         limit: { context, output: 8192 },
@@ -351,7 +348,7 @@ function makeProviderState(context = 0) {
 test("provider.models: fills limit.context from discovery when config still has zero", async () => {
   mock = installFetchMock((call) => {
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
     }
     return { body: { ok: true } }
   })
@@ -365,18 +362,32 @@ test("provider.models: fills limit.context from discovery when config still has 
   expect(writes).toHaveLength(0)
 })
 
-test("provider.models: surfaces discovered display_name in runtime model metadata", async () => {
+test("provider.models: fills missing model name from discovered display_name", async () => {
   mock = installFetchMock((call) => {
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, display_name: "Kimi Code", context_length: 262144 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, display_name: "Kimi Code", context_length: 262144 }] } }
     }
     return { body: { ok: true } }
   })
   const { hooks } = await getHooks()
-  const provider = makeProviderState()
+  const provider = makeProviderState(0, null)
   const next = await hooks.provider!.models!(provider as any, { auth: validAuth() } as any)
   expect(next[MODEL_ID]!.name).toBe("Kimi Code")
-  expect(provider.models[MODEL_ID]!.name).toBe("Kimi For Coding")
+  expect(provider.models[MODEL_ID]!.name).toBeUndefined()
+})
+
+test("provider.models: preserves an explicit model name over discovered display_name", async () => {
+  mock = installFetchMock((call) => {
+    if (call.url.endsWith("/coding/v1/models")) {
+      return { body: { data: [{ id: WIRE_MODEL_ID, display_name: "Kimi-k2.6", context_length: 262144 }] } }
+    }
+    return { body: { ok: true } }
+  })
+  const { hooks } = await getHooks()
+  const provider = makeProviderState(0, "Kimi K2.6")
+  const next = await hooks.provider!.models!(provider as any, { auth: validAuth() } as any)
+  expect(next[MODEL_ID]!.name).toBe("Kimi K2.6")
+  expect(next[MODEL_ID]!.limit?.context).toBe(262144)
 })
 
 test("provider.models: surfaces discovered image input capability so opencode does not strip images", async () => {
@@ -384,7 +395,7 @@ test("provider.models: surfaces discovered image input capability so opencode do
     if (call.url.endsWith("/coding/v1/models")) {
       return {
         body: {
-          data: [{ id: MODEL_ID, display_name: "Kimi Code", context_length: 262144, supports_image_in: true }],
+          data: [{ id: WIRE_MODEL_ID, display_name: "Kimi Code", context_length: 262144, supports_image_in: true }],
         },
       }
     }
@@ -401,7 +412,7 @@ test("provider.models: surfaces discovered image input capability so opencode do
 test("provider.models: preserves an explicit user context limit", async () => {
   mock = installFetchMock((call) => {
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
     }
     return { body: { ok: true } }
   })
@@ -420,7 +431,7 @@ test("provider.models: retries once with a refreshed token after 401", async () 
       return { body: { access_token: "fresh", refresh_token: "refresh-2", token_type: "Bearer", expires_in: 900 } }
     }
     if (call.url.endsWith("/coding/v1/models") && call.headers["authorization"] === "Bearer fresh") {
-      return { body: { data: [{ id: MODEL_ID, context_length: 131072 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 131072 }] } }
     }
     return { body: { ok: true } }
   })
@@ -441,7 +452,7 @@ test("provider.models: prefers the live auth store over a stale ctx.auth snapsho
   await withTempAuthStore(validAuth({ access: "fresh", refresh: "refresh-2" }), async () => {
     mock = installFetchMock((call) => {
       if (call.url.endsWith("/coding/v1/models") && call.headers["authorization"] === "Bearer fresh") {
-        return { body: { data: [{ id: MODEL_ID, context_length: 131072 }] } }
+        return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 131072 }] } }
       }
       return { status: 401, body: { error: "unauthorized" } }
     })
@@ -464,14 +475,14 @@ test("auth.loader: refuses to run when no credentials are persisted", async () =
 
 test("auth.loader: apiKey sentinel is returned (opencode requires truthy)", async () => {
   const { apiKey } = await getLoaderFetch(async () => validAuth())
-  expect(apiKey).toBe("kimi-for-coding-oauth")
+  expect(apiKey).toBe("kimi-code")
 })
 
 test("auth.loader: prefers live auth.json over a stale readAuth snapshot", async () => {
   await withTempAuthStore(validAuth({ access: "fresh", refresh: "refresh-2" }), async () => {
     mock = installFetchMock((call) => {
       if (call.url.endsWith("/coding/v1/models")) {
-        return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+        return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
       }
       return { body: { ok: true } }
     })
@@ -489,7 +500,7 @@ test("auth.loader: prefers live auth.json over a stale readAuth snapshot", async
 test("auth.loader: owns Authorization and strips any caller-supplied value (rule 3)", async () => {
   mock = installFetchMock((call) => {
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
     }
     return { body: { ok: true } }
   })
@@ -518,7 +529,7 @@ test("auth.loader: injects default thinking via private headers and strips them 
   })
   mock = installFetchMock((call) => {
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
     }
     return { body: { ok: true } }
   })
@@ -536,7 +547,7 @@ test("auth.loader: injects default thinking via private headers and strips them 
   expect(upstream.headers[INTERNAL_REASONING_EFFORT_HEADER]).toBeUndefined()
   expect(upstream.headers[INTERNAL_THINKING_TYPE_HEADER]).toBeUndefined()
   expect(JSON.parse(upstream.body as string)).toEqual({
-    model: MODEL_ID,
+    model: WIRE_MODEL_ID,
     messages: [],
     prompt_cache_key: "sess-default",
     thinking: { type: "enabled" },
@@ -552,7 +563,7 @@ test("auth.loader: injects selected reasoning_effort from private headers into t
   })
   mock = installFetchMock((call) => {
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
     }
     return { body: { ok: true } }
   })
@@ -566,7 +577,7 @@ test("auth.loader: injects selected reasoning_effort from private headers into t
     body: JSON.stringify({ model: MODEL_ID, messages: [] }),
   })
   expect(JSON.parse(mock.calls[1]!.body as string)).toEqual({
-    model: MODEL_ID,
+    model: WIRE_MODEL_ID,
     messages: [],
     prompt_cache_key: "sess-high",
     reasoning_effort: "high",
@@ -583,7 +594,7 @@ test("auth.loader: effort=auto injects only prompt_cache_key and never synthesiz
   })
   mock = installFetchMock((call) => {
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
     }
     return { body: { ok: true } }
   })
@@ -597,7 +608,7 @@ test("auth.loader: effort=auto injects only prompt_cache_key and never synthesiz
     body: JSON.stringify({ model: MODEL_ID, messages: [] }),
   })
   expect(JSON.parse(mock.calls[1]!.body as string)).toEqual({
-    model: MODEL_ID,
+    model: WIRE_MODEL_ID,
     messages: [],
     prompt_cache_key: "sess-auto",
   })
@@ -649,7 +660,7 @@ test("auth.loader: concurrent expiring requests share one refresh exchange", asy
       return { body: { access_token: "access-2", refresh_token: "refresh-2", token_type: "Bearer", expires_in: 900 } }
     }
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
     }
     return { body: { ok: true } }
   })
@@ -684,7 +695,7 @@ test("provider.models and auth.loader share one in-flight refresh exchange", asy
       return { body: { access_token: "fresh", refresh_token: "refresh-2", token_type: "Bearer", expires_in: 900 } }
     }
     if (call.url.endsWith("/coding/v1/models")) {
-      return { body: { data: [{ id: MODEL_ID, context_length: 131072 }] } }
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 131072 }] } }
     }
     return { body: { ok: true } }
   })
@@ -720,7 +731,7 @@ test("auth.loader: separate plugin instances share one refresh via the auth-stor
         return { body: { access_token: next.access, refresh_token: next.refresh, token_type: "Bearer", expires_in: 900 } }
       }
       if (call.url.endsWith("/coding/v1/models")) {
-        return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+        return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
       }
       return { body: { ok: true } }
     })
@@ -748,7 +759,7 @@ test("auth.loader: separate plugin instances share one refresh via the auth-stor
 })
 
 test("auth.loader: prefers the canonical MODEL_ID slug when /models returns multiple", async () => {
-  // Server returns several entries; the canonical `kimi-for-coding` is not first.
+  // Server returns several entries; the canonical `kimi` is not first.
   // Selection must still prefer it over the first element.
   const current = validAuth({ expires: Date.now() + REFRESH_SAFETY_WINDOW_MS / 2 })
   mock = installFetchMock((call) => {
@@ -760,7 +771,7 @@ test("auth.loader: prefers the canonical MODEL_ID slug when /models returns mult
         body: {
           data: [
             { id: "some-other-slug", context_length: 100000 },
-            { id: MODEL_ID, context_length: 262144, display_name: "Kimi" },
+            { id: WIRE_MODEL_ID, context_length: 262144, display_name: "Kimi" },
           ],
         },
       }
@@ -804,7 +815,7 @@ test("auth.loader: invalid_grant self-heals when the live auth store rotated mid
         }
       }
       if (call.url.endsWith("/coding/v1/models")) {
-        return { body: { data: [{ id: MODEL_ID, context_length: 262144 }] } }
+        return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }] } }
       }
       return { body: { ok: true } }
     })

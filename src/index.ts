@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import type { Plugin, PluginModule } from "@opencode-ai/plugin"
-import { API_BASE_URL, MODEL_ID, PROVIDER_ID, REFRESH_SAFETY_WINDOW_MS } from "./constants.ts"
+import { API_BASE_URL, MODEL_ID, PROVIDER_ID, REFRESH_SAFETY_WINDOW_MS, WIRE_MODEL_ID } from "./constants.ts"
 import { kimiHeaders } from "./headers.ts"
 import { type KimiModelInfo, listModels, pollDeviceToken, refreshToken, startDeviceAuth } from "./oauth.ts"
 
@@ -146,7 +146,7 @@ function sameAuth(left: OAuthAuth, right: OAuthAuth) {
 function withInvalidGrantHint(error: unknown) {
   if (!(error instanceof Error) || !/invalid_grant/.test(error.message)) return error
   const next = new Error(
-    `${error.message}. The token may have been rotated or revoked in another opencode session — run \`opencode auth login kimi-for-coding-oauth\` again if it does not self-heal.`,
+    `${error.message}. The token may have been rotated or revoked in another opencode session — run \`opencode auth login kimi-code\` again if it does not self-heal.`,
   ) as Error & { code?: string; status?: number }
   next.code = (error as Error & { code?: string }).code
   next.status = (error as Error & { status?: number }).status
@@ -258,7 +258,7 @@ function hasKimiBodyFields(fields: KimiBodyFields) {
 }
 
 function pickModelInfo(models: KimiModelInfo[]): ModelDiscovery {
-  const picked = models.find((m) => m.id === MODEL_ID) ?? models[0]
+  const picked = models.find((m) => m.id === WIRE_MODEL_ID) ?? models[0]
   if (!picked) return {}
   return {
     model_id: picked.id,
@@ -281,7 +281,7 @@ function withDiscoveredContext<T extends ModelWithDiscoveryMetadata>(model: T, c
 }
 
 function withDiscoveredDisplayName<T extends ModelWithDiscoveryMetadata>(model: T, displayName: string | undefined): T {
-  if (!displayName || model.name === displayName) return model
+  if (!displayName || model.name) return model
   return {
     ...model,
     name: displayName,
@@ -379,8 +379,8 @@ function applyDiscoveryToModels<T extends Record<string, ModelWithDiscoveryMetad
 }
 
 function buildConfigBlock(info: { model_id: string; display?: string; supports_image_in?: boolean }) {
-  const name = info.display ?? "Kimi For Coding"
-  // The opencode-side model key is always MODEL_ID ("kimi-for-coding"); the
+  const name = info.display ?? "Kimi"
+  // The opencode-side model key is always MODEL_ID ("kimi"); the
   // plugin rewrites the wire `model` body field to `info.model_id` inside
   // `loader.fetch`. This way users paste identical config even if the
   // server reports a different wire slug for their account.
@@ -396,8 +396,6 @@ function buildConfigBlock(info: { model_id: string; display?: string; supports_i
     variants: {
       off: { reasoning_effort: "off" },
       auto: { reasoning_effort: "auto" },
-      low: { reasoning_effort: "low" },
-      medium: { reasoning_effort: "medium" },
       high: { reasoning_effort: "high" },
     },
   }
@@ -417,7 +415,7 @@ function buildConfigBlock(info: { model_id: string; display?: string; supports_i
       provider: {
         [PROVIDER_ID]: {
           npm: "@ai-sdk/openai-compatible",
-          name: "Kimi For Coding (OAuth)",
+          name: "Kimi",
           options: { baseURL: API_BASE_URL },
           models: {
             [MODEL_ID]: modelConfig,
@@ -435,7 +433,7 @@ function buildConfigBlock(info: { model_id: string; display?: string; supports_i
  *
  * Responsibilities, in order of execution:
  *   1. `auth`    — register device-flow OAuth login under the
- *                  `kimi-for-coding-oauth` provider id. opencode persists the returned tokens in its
+ *                  `kimi-code` provider id. opencode persists the returned tokens in its
  *                  own auth.json; the plugin also live-reads that file so
  *                  workspace auth snapshots do not strand stale refresh
  *                  tokens.
@@ -613,7 +611,7 @@ const plugin: Plugin = async ({ client }) => {
           const current = (await readCurrentAuth(readAuth)) as (OAuthAuth & Partial<ModelDiscovery>) | undefined
           if (!current || current.type !== "oauth")
             throw new Error(
-              "kimi-for-coding-oauth: not logged in — run `opencode auth login kimi-for-coding-oauth`",
+              "kimi-code: not logged in — run `opencode auth login kimi-code`",
             )
           if (!force && !isExpiring(current)) return ensureDiscovered(current)
           const next = await refreshAuth(current, force)
@@ -634,7 +632,7 @@ const plugin: Plugin = async ({ client }) => {
         return {
           // We own the Authorization header entirely, but opencode still
           // requires a truthy apiKey to wire things up; use a sentinel.
-          apiKey: "kimi-for-coding-oauth",
+          apiKey: "kimi-code",
           fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
             const doRequest = async (auth: OAuthAuth & ModelDiscovery) => {
               const headers = new Headers(input instanceof Request ? input.headers : undefined)
@@ -662,7 +660,7 @@ const plugin: Plugin = async ({ client }) => {
               //     sent (otherwise leave the body untouched),
               //   - the body is JSON with a string `model` field equal to
               //     our opencode-side placeholder MODEL_ID.
-              // This way `input.model.id` stays `kimi-for-coding` in
+              // This way `input.model.id` stays `kimi` in
               // opencode's UI/config, while Moonshot sees whatever its
               // /models endpoint says for this account (for example a
               // non-default slug). Mirrors kimi-cli's behavior — it always sends
@@ -742,7 +740,7 @@ const plugin: Plugin = async ({ client }) => {
                         supports_image_in: discovered.supports_image_in,
                       })
                       console.log(
-                        `\n✓ Authorized for Kimi For Coding (model: ${discovered.model_id}${
+                        `\n✓ Authorized for Kimi (model: ${discovered.model_id}${
                           discovered.context_length ? `, context ${discovered.context_length}` : ""
                         })\n\nAdd this to your opencode config (~/.config/opencode/opencode.json) if you haven't already:\n\n${block}\n`,
                       )

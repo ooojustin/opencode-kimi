@@ -30,12 +30,16 @@ test("OAuth constants match upstream kimi-cli exactly", () => {
 })
 
 test("PROVIDER_ID does not collide with models.dev (AGENTS.md rule 8)", () => {
-  expect(C.PROVIDER_ID).toBe("kimi-for-coding-oauth")
+  expect(C.PROVIDER_ID).toBe("kimi-code")
   expect(C.PROVIDER_ID).not.toBe("kimi-for-coding")
 })
 
-test("MODEL_ID goes over the wire verbatim (AGENTS.md rule 6)", () => {
-  expect(C.MODEL_ID).toBe("kimi-for-coding")
+test("MODEL_ID is the stable opencode-side alias", () => {
+  expect(C.MODEL_ID).toBe("kimi")
+})
+
+test("WIRE_MODEL_ID prefers the Kimi coding endpoint model slug", () => {
+  expect(C.WIRE_MODEL_ID).toBe("kimi-for-coding")
 })
 
 test("REFRESH_SAFETY_WINDOW_MS is positive and well below token TTL", () => {

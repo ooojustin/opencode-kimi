@@ -23,14 +23,15 @@ export const OAUTH_DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 export const OAUTH_REFRESH_GRANT = "refresh_token"
 
 export const API_BASE_URL = "https://api.kimi.com/coding/v1"
-export const MODEL_ID = "kimi-for-coding"
+export const MODEL_ID = "kimi"
+export const WIRE_MODEL_ID = "kimi-for-coding"
 
-// Provider id the user must use in their opencode config. Intentionally NOT
-// "kimi-for-coding" — models.dev publishes an entry under that id (static
+// Provider id the user must use in their opencode config. Intentionally not
+// "kimi-for-coding" - models.dev publishes an entry under that id (static
 // KIMI_API_KEY flow via a different SDK / auth shape), and sharing the id
 // would surface two auth methods under one `opencode auth login` entry and
 // silently route users onto the wrong integration path. See AGENTS.md rule 7.
-export const PROVIDER_ID = "kimi-for-coding-oauth"
+export const PROVIDER_ID = "kimi-code"
 
 // Refresh a bit before the server-reported expiry so we never race it.
 export const REFRESH_SAFETY_WINDOW_MS = 60_000

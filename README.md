@@ -8,7 +8,7 @@ Compared with stock opencode Kimi setups, this plugin:
 - talks to `https://api.kimi.com/coding/v1` through `@ai-sdk/openai-compatible`
 - sends the same `User-Agent` / `X-Msh-*` fingerprint headers as `kimi-cli`
 - reuses `~/.kimi/device_id` for `X-Msh-Device-Id`
-- adds `prompt_cache_key`, `thinking`, and `reasoning_effort` for `kimi-for-coding` requests
+- adds `prompt_cache_key`, `thinking`, and `reasoning_effort` for `kimi` requests
 - discovers the authoritative wire model slug, API display name, context length, and image-input capability from `/coding/v1/models`
 - keeps tokens in opencode's auth store while mirroring `kimi-cli`'s refresh / retry behavior
 
@@ -22,14 +22,14 @@ Contributor and agent documentation lives in [`AGENTS.md`](./AGENTS.md).
 
 1. Install the plugin globally: `opencode plugin opencode-kimi-full --global`
 2. If you are testing a local checkout instead of the published package, install the checkout path instead: `opencode plugin /absolute/path/to/opencode-kimi-full --global`
-3. Run `opencode auth login -p kimi-for-coding-oauth` and approve the device flow in your browser.
+3. Run `opencode auth login -p kimi-code` and approve the device flow in your browser.
 4. Paste the provider block from [Configure](#configure) into your opencode config.
-5. Select `kimi-for-coding-oauth/kimi-for-coding` in opencode.
+5. Select `kimi-code/kimi` in opencode.
 
 ### Requirements
 
 - `opencode` ≥ 1.4.6
-- A Kimi account with an active **Kimi For Coding** subscription (the same plan that works with kimi-cli)
+- A Kimi account with an active **Kimi** subscription (the same plan that works with kimi-cli)
 
 ### Install
 
@@ -39,7 +39,7 @@ Recommended:
 opencode plugin opencode-kimi-full --global
 ```
 
-That installs the published package and adds the plugin to your global opencode config, so `opencode auth login -p kimi-for-coding-oauth` works from any directory.
+That installs the published package and adds the plugin to your global opencode config, so `opencode auth login -p kimi-code` works from any directory.
 
 From a local checkout:
 
@@ -77,23 +77,21 @@ After the plugin is installed and login works, paste this provider entry into `~
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {
-    "kimi-for-coding-oauth": {
-      "name": "Kimi For Coding (OAuth)",
+    "kimi-code": {
+      "name": "Kimi",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "https://api.kimi.com/coding/v1"
       },
       "models": {
-        "kimi-for-coding": {
-          "name": "Kimi For Coding",
+        "kimi": {
+          "name": "Kimi",
           "reasoning": true,
           "options": {},
           "variants": {
-            "off":    { "reasoning_effort": "off" },
-            "auto":   { "reasoning_effort": "auto" },
-            "low":    { "reasoning_effort": "low" },
-            "medium": { "reasoning_effort": "medium" },
-            "high":   { "reasoning_effort": "high" }
+            "off":  { "reasoning_effort": "off" },
+            "auto": { "reasoning_effort": "auto" },
+            "high": { "reasoning_effort": "high" }
           }
         }
       }
@@ -102,19 +100,19 @@ After the plugin is installed and login works, paste this provider entry into `~
 }
 ```
 
-This block is for using the model after login. It does **not** register the auth provider by itself. What makes `opencode auth login -p kimi-for-coding-oauth` work is the plugin being loaded via `opencode plugin ...` or the `plugin` array above.
+This block is for using the model after login. It does **not** register the auth provider by itself. What makes `opencode auth login -p kimi-code` work is the plugin being loaded via `opencode plugin ...` or the `plugin` array above.
 
 Use these two ids exactly as written:
 
-- **provider id** `kimi-for-coding-oauth` — the plugin's `auth` and `chat.params` hooks match on it.
-- **model id** `kimi-for-coding` — a stable opencode-side alias. At login and on every token refresh the plugin queries `/coding/v1/models` and rewrites the wire `model` field if the server reports a different slug for your account.
+- **provider id** `kimi-code` — the plugin's `auth` and `chat.params` hooks match on it.
+- **model id** `kimi` — a stable opencode-side alias. At login and on every token refresh the plugin queries `/coding/v1/models` and rewrites the wire `model` field if the server reports a different slug for your account.
 
-> **Note.** The provider id is intentionally not `kimi-for-coding`. That id is already published by [models.dev](https://models.dev) and points at a static-API-key flow using a different SDK and auth shape. Using a distinct id keeps the two paths from colliding under a single `opencode auth login` entry.
+> **Note.** The provider id is intentionally not `kimi`. That id is already published by [models.dev](https://models.dev) and points at a static-API-key flow using a different SDK and auth shape. Using a distinct id keeps the two paths from colliding under a single `opencode auth login` entry.
 
 ### Log in
 
 ```sh
-opencode auth login -p kimi-for-coding-oauth
+opencode auth login -p kimi-code
 ```
 
 Then complete the device-flow approval in your browser.
@@ -129,7 +127,7 @@ During login the plugin:
 Access tokens refresh automatically while you use the model.
 
 <details>
-<summary><strong>Troubleshooting: Unknown provider "kimi-for-coding-oauth"</strong></summary>
+<summary><strong>Troubleshooting: Unknown provider "kimi-code"</strong></summary>
 
 That error means opencode did not load this plugin at all. The Kimi OAuth flow has not started yet.
 
@@ -144,7 +142,7 @@ Fastest fix:
 
 1. Install the plugin globally with `opencode plugin opencode-kimi-full --global`, or `opencode plugin /absolute/path/to/opencode-kimi-full --global` for a checkout.
 2. Confirm your opencode config now contains the plugin entry.
-3. Run `opencode auth login -p kimi-for-coding-oauth` again.
+3. Run `opencode auth login -p kimi-code` again.
 
 </details>
 
@@ -162,23 +160,21 @@ Fastest fix:
 
 ### Use
 
-Select `kimi-for-coding-oauth/kimi-for-coding` in opencode.
+Select `kimi-code/kimi` in opencode.
 
 The default variant-cycle keybind is **Ctrl+T**. The variants map as follows:
 
 - `off` → sends `thinking: { "type": "disabled" }`
 - `auto` → omits both `thinking` and `reasoning_effort`
-- `low` / `medium` / `high` → send `thinking: { "type": "enabled" }` plus the matching `reasoning_effort`
+- `high` → sends `thinking: { "type": "enabled" }` plus `reasoning_effort: "high"`
 
 These variants only affect Kimi's reasoning request fields. They do not switch models or auth paths. In practice:
 
 - `off` asks the backend to disable thinking
 - `auto` leaves the decision to the server
-- `low` / `medium` / `high` ask for enabled thinking with the corresponding reasoning effort
+- `high` matches the explicit thinking mode used by Kimi Code CLI
 
-The exact behavioral difference between `low`, `medium`, and `high` is controlled by Kimi's backend, so this should be read as a server hint rather than a guaranteed latency/quality ladder.
-
-Every `kimi-for-coding` request also gets `prompt_cache_key` set to opencode's session id. That mirrors `kimi-cli`'s cache hint so follow-up turns in the same session can reuse Kimi's prompt cache.
+Every `kimi` request also gets `prompt_cache_key` set to opencode's session id. That mirrors `kimi-cli`'s cache hint so follow-up turns in the same session can reuse Kimi's prompt cache.
 
 ---
 
@@ -192,7 +188,7 @@ Stock opencode can already talk to generic Moonshot and OpenAI-compatible endpoi
 - OAuth device flow with `scope: kimi-code`.
 - `@ai-sdk/openai-compatible` pointed at `https://api.kimi.com/coding/v1`.
 - `prompt_cache_key` set to opencode's session id, for session-scoped cache reuse.
-- Paired `thinking` + `reasoning_effort` fields.
+- Kimi thinking fields for `off`, `auto`, and `high`.
 - The seven `X-Msh-*` headers and a kimi-cli-shaped `User-Agent`.
 - `~/.kimi/device_id` shared with a locally-installed kimi-cli.
 - Runtime model discovery from `/coding/v1/models`, including the server-reported wire slug, `display_name`, and `context_length`.
@@ -208,7 +204,7 @@ Stock opencode can already talk to generic Moonshot and OpenAI-compatible endpoi
 | Field | Wire shape | Purpose |
 |---|---|---|
 | `prompt_cache_key` | top-level body, snake_case, set to opencode's `sessionID` | Opt-in, session-scoped cache key, mirroring kimi-cli. |
-| `thinking` + `reasoning_effort` | `thinking: { type: "enabled" \| "disabled" }` with sibling `reasoning_effort: "low" \| "medium" \| "high"` | Sent together, matching kimi-cli. |
+| `thinking` + `reasoning_effort` | `thinking: { type: "enabled" \| "disabled" }` with sibling `reasoning_effort: "high"` when high thinking is selected | Sent in the shape Kimi's coding endpoint accepts. |
 | Seven `X-Msh-*` headers + UA | `User-Agent`, `X-Msh-Platform`, `X-Msh-Version`, `X-Msh-Device-Name`, `X-Msh-Device-Model`, `X-Msh-Device-Id`, `X-Msh-Os-Version` | Matches kimi-cli's `_kimi_default_headers()` at the pinned `KIMI_CLI_VERSION`. |
 | `/coding/v1/models` discovery | `id`, `display_name`, `context_length` | Supplies the authoritative wire model slug plus runtime model metadata. |
 | `~/.kimi/device_id` | UUID persisted on disk, embedded in `X-Msh-Device-Id` | Sends the same `X-Msh-Device-Id` as a locally-installed kimi-cli. |
@@ -219,9 +215,9 @@ Effort-to-field mapping used by the plugin:
 |---|---|---|
 | `auto` | *(omitted)* | *(omitted)* — server picks dynamically |
 | `off` | *(omitted)* | `{ type: "disabled" }` |
-| `low` / `medium` / `high` | same string | `{ type: "enabled" }` |
+| `high` | `"high"` | `{ type: "enabled" }` |
 
-`kimi-cli` does not currently surface this as a separate user-facing level selector. The plugin exposes the same wire-level controls as opencode variants so you can choose them explicitly.
+`kimi-cli` exposes thinking as a toggle and maps enabled thinking to high effort. This plugin intentionally does not advertise `low` or `medium` variants because they are generic OpenAI-style effort values, not clearly supported Kimi Code CLI modes.
 
 </details>
 
