@@ -101,7 +101,9 @@ After the plugin is installed and login works, paste this provider entry into `~
 
 > **Important:** The `attachment` and `modalities` fields are required for image input to work. Without them, opencode strips image parts before they reach Kimi. If you previously pasted an older config block without these fields, update it.
 
-The `models` block above is only an offline fallback. At login, on first use, and on every token refresh the plugin queries `/coding/v1/models` and surfaces **every model your account is entitled to** as its own opencode model, so a Kimi subscription that includes K3 gives you `kimi-code/k3` and `kimi-code/k3-256k` alongside `kimi-code/kimi-for-coding` without touching your config. Reasoning variants come from each model's own `think_efforts`, so K3 exposes `low`/`high`/`max` while older models get the legacy ladder.
+Declare one entry per model you want to use, keyed by its wire id. A Kimi subscription that includes K3 exposes `k3`, `k3-256k`, `kimi-for-coding`, and `kimi-for-coding-highspeed`; `opencode auth login` prints a ready-to-paste block covering every model your account is actually entitled to, so you do not have to guess the ids.
+
+opencode resolves `provider/model` against this config, so a model you don't declare here is not selectable even though the plugin discovers it. What the plugin does at runtime is fill in each declared model's context length, display name, and media capabilities from `/coding/v1/models`, and apply the right reasoning-effort rules per model: K3 accepts `low`/`high`/`max`, older models take the legacy `low`/`medium`/`high` ladder, and neither can have thinking turned off.
 
 This block does **not** register the auth provider by itself. What makes `opencode auth login -p kimi-code` work is the plugin being loaded via `opencode plugin ...` or the `plugin` array above.
 

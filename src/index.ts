@@ -299,11 +299,16 @@ function withDiscoveredMediaInput<T extends ModelWithDiscoveryMetadata>(
 }
 
 /**
- * Surfaces every model the account is entitled to as its own opencode model,
- * keyed by wire id, so `kimi-code/k3` and `kimi-code/kimi-for-coding` are both
- * selectable. Config-declared entries are kept and enriched rather than
- * replaced, so an explicit `name` or `limit` in opencode.json still wins and
- * the provider stays usable from config alone when discovery fails.
+ * Enriches each model with what `/coding/v1/models` reports for it, keyed by
+ * wire id. Config-declared entries are kept and enriched rather than replaced,
+ * so an explicit `name` or `limit` in opencode.json still wins.
+ *
+ * Entries for models the config does NOT declare are included too, but note
+ * that opencode resolves `provider/model` against the config before this hook
+ * runs — an undeclared model still fails with "Model not found". Verified
+ * against opencode 1.4.x on 2026-08-08. So this makes discovered models
+ * complete, not selectable; the config must declare the ids it wants, and
+ * `buildConfigBlock()` prints exactly that block after login.
  */
 function applyDiscoveryToModels<T extends Record<string, ModelWithDiscoveryMetadata>>(models: T, discovery: ModelDiscovery): T {
   if (discovery.size === 0) return models
