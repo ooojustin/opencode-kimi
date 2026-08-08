@@ -9,7 +9,7 @@ Compared with stock opencode Kimi setups, this plugin:
 - sends the same `User-Agent` / `X-Msh-*` fingerprint headers as `kimi-cli`
 - reuses `~/.kimi/device_id` for `X-Msh-Device-Id`
 - adds `prompt_cache_key`, `thinking`, and `reasoning_effort` for `kimi-for-coding` requests
-- discovers the authoritative wire model slug, display name, context length, and media-input capabilities from `/coding/v1/models`
+- surfaces every model your account is entitled to (K3 included) from `/coding/v1/models`, with per-model display name, context length, media-input capabilities, and reasoning-effort tiers
 - keeps tokens in opencode's auth store while mirroring `kimi-cli`'s refresh / retry behavior
 - provides a `/kimi:usage` TUI command to check subscription usage
 
@@ -21,9 +21,9 @@ Contributor and agent documentation lives in [`AGENTS.md`](./AGENTS.md).
 
 1. Install the plugin globally: `opencode plugin opencode-kimi-full --global`
 2. If you are testing a local checkout instead of the published package, install the checkout path instead: `opencode plugin /absolute/path/to/opencode-kimi-full --global`
-3. Run `opencode auth login -p kimi-for-coding-oauth` and approve the device flow in your browser.
+3. Run `opencode auth login -p kimi-code` and approve the device flow in your browser.
 4. Paste the provider block from [Configure](#configure) into your opencode config.
-5. Select `kimi-for-coding-oauth/kimi-for-coding` in opencode.
+5. Select `kimi-code/k3` (or any other entitled model) in opencode.
 
 ### Requirements
 
@@ -38,7 +38,7 @@ Recommended:
 opencode plugin opencode-kimi-full --global
 ```
 
-That installs the published package and adds the plugin to your global opencode config, so `opencode auth login -p kimi-for-coding-oauth` works from any directory.
+That installs the published package and adds the plugin to your global opencode config, so `opencode auth login -p kimi-code` works from any directory.
 
 From a local checkout:
 
@@ -76,29 +76,22 @@ After the plugin is installed and login works, paste this provider entry into `~
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {
-    "kimi-for-coding-oauth": {
-      "name": "Kimi For Coding (OAuth)",
+    "kimi-code": {
+      "name": "Kimi",
       "npm": "@ai-sdk/openai-compatible",
       "options": {
         "baseURL": "https://api.kimi.com/coding/v1"
       },
       "models": {
         "kimi-for-coding": {
-          "name": "Kimi For Coding",
+          "name": "K2.7 Coding",
           "attachment": true,
           "reasoning": true,
           "modalities": {
             "input": ["text", "image"],
             "output": ["text"]
           },
-          "options": {},
-          "variants": {
-            "off":    { "reasoning_effort": "off" },
-            "auto":   { "reasoning_effort": "auto" },
-            "low":    { "reasoning_effort": "low" },
-            "medium": { "reasoning_effort": "medium" },
-            "high":   { "reasoning_effort": "high" }
-          }
+          "options": {}
         }
       }
     }
@@ -108,19 +101,19 @@ After the plugin is installed and login works, paste this provider entry into `~
 
 > **Important:** The `attachment` and `modalities` fields are required for image input to work. Without them, opencode strips image parts before they reach Kimi. If you previously pasted an older config block without these fields, update it.
 
-This block is for using the model after login. It does **not** register the auth provider by itself. What makes `opencode auth login -p kimi-for-coding-oauth` work is the plugin being loaded via `opencode plugin ...` or the `plugin` array above.
+The `models` block above is only an offline fallback. At login, on first use, and on every token refresh the plugin queries `/coding/v1/models` and surfaces **every model your account is entitled to** as its own opencode model, so a Kimi subscription that includes K3 gives you `kimi-code/k3` and `kimi-code/k3-256k` alongside `kimi-code/kimi-for-coding` without touching your config. Reasoning variants come from each model's own `think_efforts`, so K3 exposes `low`/`high`/`max` while older models get the legacy ladder.
 
-Use these two ids exactly as written:
+This block does **not** register the auth provider by itself. What makes `opencode auth login -p kimi-code` work is the plugin being loaded via `opencode plugin ...` or the `plugin` array above.
 
-- **provider id** `kimi-for-coding-oauth` -- the plugin's `auth` and `chat.params` hooks match on it.
-- **model id** `kimi-for-coding` -- a stable opencode-side alias. At login and on every token refresh the plugin queries `/coding/v1/models` and rewrites the wire `model` field if the server reports a different slug for your account.
+- **provider id** `kimi-code` -- the plugin's `auth` and `chat.params` hooks match on it. Use it exactly as written.
+- **model ids** are the wire slugs `/coding/v1/models` returns; nothing is aliased or rewritten.
 
 > **Note.** The provider id is intentionally not `kimi-for-coding`. That id is already published by [models.dev](https://models.dev) and points at a static-API-key flow using a different SDK and auth shape. Using a distinct id keeps the two paths from colliding under a single `opencode auth login` entry.
 
 ### Log in
 
 ```sh
-opencode auth login -p kimi-for-coding-oauth
+opencode auth login -p kimi-code
 ```
 
 Then complete the device-flow approval in your browser.
@@ -129,13 +122,13 @@ During login the plugin:
 
 - shows a verification URL and user code
 - stores the OAuth token in opencode's auth store
-- discovers the exact model slug, display name, context length, and media-input capabilities your account should send to Kimi
-- prints a config hint that uses the discovered display name and capabilities
+- discovers every model slug, display name, context length, and media-input capability your account is entitled to
+- prints a config hint covering all of them
 
 Access tokens refresh automatically while you use the model.
 
 <details>
-<summary><strong>Troubleshooting: Unknown provider "kimi-for-coding-oauth"</strong></summary>
+<summary><strong>Troubleshooting: Unknown provider "kimi-code"</strong></summary>
 
 That error means opencode did not load this plugin at all. The Kimi OAuth flow has not started yet.
 
@@ -150,7 +143,7 @@ Fastest fix:
 
 1. Install the plugin globally with `opencode plugin opencode-kimi-full --global`, or `opencode plugin /absolute/path/to/opencode-kimi-full --global` for a checkout.
 2. Confirm your opencode config now contains the plugin entry.
-3. Run `opencode auth login -p kimi-for-coding-oauth` again.
+3. Run `opencode auth login -p kimi-code` again.
 
 </details>
 
@@ -179,7 +172,7 @@ The plugin also backfills these capabilities at runtime from `/coding/v1/models`
 
 ### Use
 
-Select `kimi-for-coding-oauth/kimi-for-coding` in opencode.
+Select `kimi-code/k3` (or any other entitled model) in opencode.
 
 The default variant-cycle keybind is **Ctrl+T**. The variants map as follows:
 

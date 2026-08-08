@@ -5,7 +5,12 @@ import { test, expect, afterEach } from "bun:test"
 import pluginModule from "../src/index.ts"
 
 const plugin = pluginModule.server
-import { MODEL_ID, PROVIDER_ID, REFRESH_SAFETY_WINDOW_MS, WIRE_MODEL_ID } from "../src/constants.ts"
+import { PROVIDER_ID, REFRESH_SAFETY_WINDOW_MS } from "../src/constants.ts"
+
+// opencode model keys are wire ids, so these are one and the same. Both names
+// are kept so each assertion still reads from the side it cares about.
+const MODEL_ID = "kimi-for-coding"
+const WIRE_MODEL_ID = MODEL_ID
 import { installFetchMock } from "./_util/fetchMock.ts"
 
 // kimiHeaders() → getDeviceId() reads/writes ~/.kimi/device_id; that file is
@@ -157,12 +162,13 @@ test("chat.params: no-op for other providers (AGENTS.md rule: gated on PROVIDER_
   expect(output.options).toEqual({ reasoning_effort: "high" })
 })
 
-test("chat.params: no-op for other models under our provider (rule 5 gating)", async () => {
+test("chat.params: applies to every model under our provider (rule 5 gating)", async () => {
+  // Each model under kimi-code is a Kimi model by construction, so the fields
+  // attach to all of them — the provider id is the whole gate.
   const { hooks } = await getHooks()
   const hook = hooks["chat.params"]!
-  const { output } = await callParams(hook, { modelID: "kimi-something-else" })
-  expect(output.options.prompt_cache_key).toBeUndefined()
-  expect(output.options.thinking).toBeUndefined()
+  const { output } = await callParams(hook, { modelID: "k3" })
+  expect(output.options.prompt_cache_key).toBe("sess-1")
 })
 
 test("chat.params: attaches prompt_cache_key = sessionID for kimi only", async () => {
@@ -347,6 +353,98 @@ function makeProviderState(context = 0, name: string | null = "Kimi") {
 }
 
 // ---------- provider.models -------------------------------------------------
+
+const K3_INFO = {
+  id: "k3",
+  display_name: "K3",
+  context_length: 262144,
+  supports_image_in: true,
+  supports_video_in: true,
+  supports_thinking_type: "only",
+  think_efforts: { support: true, valid_efforts: ["low", "high", "max"], default_effort: "high" },
+}
+
+test("provider.models: surfaces every entitled model, not just the configured one", async () => {
+  mock = installFetchMock((call) => {
+    if (call.url.endsWith("/coding/v1/models")) {
+      return { body: { data: [{ id: WIRE_MODEL_ID, context_length: 262144 }, K3_INFO] } }
+    }
+    return { body: { ok: true } }
+  })
+  const { hooks } = await getHooks()
+  const provider = makeProviderState()
+  const next = await hooks.provider!.models!(provider as any, { auth: validAuth() } as any)
+  // k3 was never declared in config; discovery alone must make it selectable.
+  const discovered = next as Record<string, { name?: string; limit?: { context?: number } }>
+  expect(discovered.k3).toBeDefined()
+  expect(discovered.k3!.name).toBe("K3")
+  expect(discovered.k3!.limit?.context).toBe(262144)
+  // Config-only models are left alone.
+  expect(discovered["some-other-model"]).toBeDefined()
+  // The input record is not mutated.
+  expect((provider.models as Record<string, unknown>).k3).toBeUndefined()
+})
+
+test("provider.models: derives K3 variants from think_efforts and omits the dead off switch", async () => {
+  mock = installFetchMock((call) => {
+    if (call.url.endsWith("/coding/v1/models")) return { body: { data: [K3_INFO] } }
+    return { body: { ok: true } }
+  })
+  const { hooks } = await getHooks()
+  const next = await hooks.provider!.models!(makeProviderState() as any, { auth: validAuth() } as any)
+  const variants = (next.k3 as { variants?: Record<string, unknown> }).variants!
+  expect(Object.keys(variants).sort()).toEqual(["auto", "high", "low", "max"])
+  expect(variants.off).toBeUndefined()
+})
+
+test("chat.params: K3 keeps `max` effort instead of clamping it to high", async () => {
+  mock = installFetchMock((call) => {
+    if (call.url.endsWith("/coding/v1/models")) return { body: { data: [K3_INFO] } }
+    return { body: { ok: true } }
+  })
+  const { hooks } = await getHooks()
+  // Warm the discovery cache the same way a real session does.
+  await hooks.provider!.models!(makeProviderState() as any, { auth: validAuth() } as any)
+  const { output } = await callParams(
+    hooks["chat.params"]!,
+    { modelID: "k3", modelOptions: { reasoning_effort: "max" } },
+    { reasoning_effort: "max" },
+  )
+  expect(output.options.reasoning_effort).toBe("max")
+  expect(output.options.thinking).toEqual({ type: "enabled" })
+})
+
+test("chat.params: an effort outside K3's vocabulary falls back to its default_effort", async () => {
+  mock = installFetchMock((call) => {
+    if (call.url.endsWith("/coding/v1/models")) return { body: { data: [K3_INFO] } }
+    return { body: { ok: true } }
+  })
+  const { hooks } = await getHooks()
+  await hooks.provider!.models!(makeProviderState() as any, { auth: validAuth() } as any)
+  const { output } = await callParams(
+    hooks["chat.params"]!,
+    { modelID: "k3", modelOptions: { reasoning_effort: "medium" } },
+    { reasoning_effort: "medium" },
+  )
+  expect(output.options.reasoning_effort).toBe("high")
+})
+
+test("chat.params: effort=off cannot disable thinking on an always-thinking model", async () => {
+  mock = installFetchMock((call) => {
+    if (call.url.endsWith("/coding/v1/models")) return { body: { data: [K3_INFO] } }
+    return { body: { ok: true } }
+  })
+  const { hooks } = await getHooks()
+  await hooks.provider!.models!(makeProviderState() as any, { auth: validAuth() } as any)
+  const { output } = await callParams(
+    hooks["chat.params"]!,
+    { modelID: "k3", modelOptions: { reasoning_effort: "off" } },
+    { reasoning_effort: "off" },
+  )
+  // supports_thinking_type "only" — sending thinking.type=disabled would 400.
+  expect(output.options.thinking).toBeUndefined()
+  expect(output.options.reasoning_effort).toBeUndefined()
+})
 
 test("provider.models: fills limit.context from discovery when config still has zero", async () => {
   mock = installFetchMock((call) => {
@@ -787,9 +885,7 @@ test("auth.loader: separate plugin instances share one refresh via the auth-stor
   })
 })
 
-test("auth.loader: prefers the canonical MODEL_ID slug when /models returns multiple", async () => {
-  // Server returns several entries; the canonical `kimi` is not first.
-  // Selection must still prefer it over the first element.
+test("auth.loader: discovery metadata never leaks into the persisted auth entry", async () => {
   const current = validAuth({ expires: Date.now() + REFRESH_SAFETY_WINDOW_MS / 2 })
   mock = installFetchMock((call) => {
     if (call.url.includes("/oauth/token")) {
@@ -879,8 +975,9 @@ test("auth.loader: discovers /models on first request when auth storage only has
     "https://api.kimi.com/coding/v1/models",
     "https://api.kimi.com/coding/v1/chat/completions",
   ])
+  // Discovery warms the effort cache; it must not retarget the request.
   const sentBody = JSON.parse(mock.calls[1]!.body as string)
-  expect(sentBody.model).toBe("k2p5")
+  expect(sentBody.model).toBe(MODEL_ID)
 })
 
 test("auth.loader: caches discovered model info for subsequent requests in the same loader", async () => {
@@ -904,48 +1001,43 @@ test("auth.loader: caches discovered model info for subsequent requests in the s
   expect(mock.calls.filter((c) => c.url.endsWith("/coding/v1/models"))).toHaveLength(1)
 })
 
-test("auth.loader: rewrites wire `model` to the discovered server id (Option A)", async () => {
-  // Persisted auth already carries a discovered model_id different from the
-  // opencode-side MODEL_ID placeholder — this is the alternate-slug case.
-  const current = {
-    ...validAuth(),
-    model_id: "k2p5",
-  } as unknown as ReturnType<typeof validAuth>
-  mock = installFetchMock(() => ({ body: { ok: true } }))
-  const { fetch: f } = await getLoaderFetch(async () => current)
+test("auth.loader: sends the selected model id through unchanged", async () => {
+  // Model keys are wire ids now, so whatever opencode put on the body is
+  // already correct — the loader must not touch it.
+  mock = installFetchMock((call) => {
+    if (call.url.endsWith("/coding/v1/models")) {
+      return { body: { data: [{ id: "k3", context_length: 262144 }] } }
+    }
+    return { body: { ok: true } }
+  })
+  const { fetch: f } = await getLoaderFetch(async () => validAuth())
   await f("https://api.kimi.com/coding/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL_ID, messages: [] }),
+    body: JSON.stringify({ model: "k3", messages: [] }),
   })
-  expect(mock.calls).toHaveLength(1)
-  const sentBody = JSON.parse(mock.calls[0]!.body as string)
-  expect(sentBody.model).toBe("k2p5")
+  const chat = mock.calls.find((c) => c.url.endsWith("/chat/completions"))!
+  const sentBody = JSON.parse(chat.body as string)
+  expect(sentBody.model).toBe("k3")
   expect(sentBody.messages).toEqual([])
 })
 
-test("auth.loader: leaves body untouched when discovered id equals MODEL_ID", async () => {
-  const current = { ...validAuth(), model_id: MODEL_ID } as unknown as ReturnType<typeof validAuth>
+test("auth.loader: leaves body byte-identical when no Kimi fields are set", async () => {
   mock = installFetchMock(() => ({ body: { ok: true } }))
-  const { fetch: f } = await getLoaderFetch(async () => current)
+  const { fetch: f } = await getLoaderFetch(async () => validAuth())
   const originalBody = JSON.stringify({ model: MODEL_ID, x: 1 })
   await f("https://api.kimi.com/coding/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: originalBody,
   })
-  expect(mock.calls[0]!.body).toBe(originalBody)
+  const chat = mock.calls.find((c) => c.url.endsWith("/chat/completions"))!
+  expect(chat.body).toBe(originalBody)
 })
 
-test("auth.loader: preserves Request input headers while still rewriting Authorization and model", async () => {
+test("auth.loader: preserves Request input headers while still rewriting Authorization", async () => {
   mock = installFetchMock(() => ({ body: { ok: true } }))
-  const { fetch: f } = await getLoaderFetch(
-    async () =>
-      ({
-        ...validAuth(),
-        model_id: "k2p5",
-      }) as unknown as ReturnType<typeof validAuth>,
-  )
+  const { fetch: f } = await getLoaderFetch(async () => validAuth())
   const req = new Request("https://api.kimi.com/coding/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -956,9 +1048,10 @@ test("auth.loader: preserves Request input headers while still rewriting Authori
     body: JSON.stringify({ model: MODEL_ID, messages: [] }),
   })
   await f(req)
-  expect(mock.calls[0]!.headers["x-extra"]).toBe("keep-me")
-  expect(mock.calls[0]!.headers["authorization"]).toBe("Bearer access-1")
-  expect(JSON.parse(mock.calls[0]!.body as string).model).toBe("k2p5")
+  const chat = mock.calls.find((c) => c.url.endsWith("/chat/completions"))!
+  expect(chat.headers["x-extra"]).toBe("keep-me")
+  expect(chat.headers["authorization"]).toBe("Bearer access-1")
+  expect(JSON.parse(chat.body as string).model).toBe(MODEL_ID)
 })
 
 test("auth.loader: 401 triggers exactly one forced refresh + retry (no infinite loop)", async () => {
@@ -1043,7 +1136,17 @@ test("auth callback prints a schema-valid config snippet with top-level model va
     if (call.url.endsWith("/coding/v1/models")) {
       return {
         body: {
-          data: [{ id: "kimi-for-coding", display_name: "Kimi Code", context_length: 262144, supports_image_in: true }],
+          data: [
+            { id: "kimi-for-coding", display_name: "Kimi Code", context_length: 262144, supports_image_in: true },
+            {
+              id: "k3",
+              display_name: "K3",
+              context_length: 262144,
+              supports_image_in: true,
+              supports_thinking_type: "only",
+              think_efforts: { support: true, valid_efforts: ["low", "high", "max"], default_effort: "high" },
+            },
+          ],
         },
       }
     }
@@ -1083,16 +1186,26 @@ test("auth callback prints a schema-valid config snippet with top-level model va
       }
     }
   }
-  const model = parsed.provider[PROVIDER_ID]!.models[MODEL_ID]!
-  expect(text).toContain("context 262144")
-  expect(model.attachment).toBe(true)
-  expect(model.limit).toBeUndefined()
-  expect(model.modalities).toEqual({
+  const models = parsed.provider[PROVIDER_ID]!.models
+  expect(text).toContain("kimi-for-coding, k3")
+  // Every entitled model gets its own top-level entry, keyed by wire id.
+  expect(Object.keys(models).sort()).toEqual(["k3", "kimi-for-coding"])
+
+  const k2 = models[MODEL_ID]!
+  expect(k2.attachment).toBe(true)
+  expect(k2.limit).toBeUndefined()
+  expect(k2.modalities).toEqual({
     input: ["text", "image"],
     output: ["text"],
   })
-  expect(model.options).toEqual({})
-  expect(model.variants?.off).toEqual({ reasoning_effort: "off" })
-  expect(model.variants?.auto).toEqual({ reasoning_effort: "auto" })
-  expect(model.options?.variants).toBeUndefined()
+  expect(k2.options).toEqual({})
+  // No published effort vocabulary — legacy ladder, and thinking can be off.
+  expect(Object.keys(k2.variants!).sort()).toEqual(["auto", "high", "low", "medium", "off"])
+
+  const k3 = models.k3!
+  // K3 publishes its own vocabulary, including the `max` tier the legacy
+  // clamp used to throw away, and always thinks so it gets no `off`.
+  expect(Object.keys(k3.variants!).sort()).toEqual(["auto", "high", "low", "max"])
+  expect(k3.variants?.max).toEqual({ reasoning_effort: "max" })
+  expect(k3.variants?.off).toBeUndefined()
 })

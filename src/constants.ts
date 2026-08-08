@@ -22,8 +22,6 @@ export const OAUTH_DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 export const OAUTH_REFRESH_GRANT = "refresh_token"
 
 export const API_BASE_URL = "https://api.kimi.com/coding/v1"
-export const MODEL_ID = "kimi"
-export const WIRE_MODEL_ID = "kimi-for-coding"
 
 // Provider id the user must use in their opencode config. Intentionally not
 // "kimi-for-coding" - models.dev publishes an entry under that id (static

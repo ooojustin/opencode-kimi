@@ -183,6 +183,16 @@ export type KimiModelInfo = {
   supports_reasoning?: boolean
   supports_image_in?: boolean
   supports_video_in?: boolean
+  // "only" means the model always thinks and rejects thinking.type=disabled.
+  supports_thinking_type?: "only" | "both" | "none"
+  // Present on K3-era models. `valid_efforts` is the authoritative effort
+  // vocabulary for that model — K3 accepts low/high/max, K2.7 sends none of
+  // this and takes the legacy kimi-cli ladder instead.
+  think_efforts?: {
+    support?: boolean
+    valid_efforts?: string[]
+    default_effort?: string
+  }
 }
 
 /**

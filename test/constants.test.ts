@@ -33,14 +33,6 @@ test("PROVIDER_ID does not collide with models.dev (AGENTS.md rule 8)", () => {
   expect(C.PROVIDER_ID).not.toBe("kimi-for-coding")
 })
 
-test("MODEL_ID is the stable opencode-side alias", () => {
-  expect(C.MODEL_ID).toBe("kimi")
-})
-
-test("WIRE_MODEL_ID prefers the Kimi coding endpoint model slug", () => {
-  expect(C.WIRE_MODEL_ID).toBe("kimi-for-coding")
-})
-
 test("REFRESH_SAFETY_WINDOW_MS is positive and well below token TTL", () => {
   // Token TTLs are ~15 min; anything bigger would mean we refresh on every call.
   expect(C.REFRESH_SAFETY_WINDOW_MS).toBeGreaterThan(0)
